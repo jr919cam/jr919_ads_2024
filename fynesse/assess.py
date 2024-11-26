@@ -1,5 +1,7 @@
+import pandas as pd
 from .config import *
-
+import osmnx as ox
+import matplotlib.pyplot as plt
 from . import access
 
 """These are the types of import we might expect in this file
