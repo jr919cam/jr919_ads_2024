@@ -33,9 +33,9 @@ def labelled(data):
     raise NotImplementedError
 
 
-def get_box(latitude, longitude):
-  box_height = 0.018
-  box_width = 0.029
+def get_box(latitude, longitude, length):
+  box_height = 0.018*length
+  box_width = 0.029*length
   north = latitude + box_height/2
   south = latitude - box_height/2
   west = longitude - box_width/2
