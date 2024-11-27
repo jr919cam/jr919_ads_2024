@@ -115,3 +115,26 @@ def get_merged_df(pp_buildings_df, pois):
   both = merged_df[merged_df['_merge'] == 'both']
   print("\nnum matches:", len(both), "| num unmatched pp:", len(unmatched_pp), "| num unmatched osm:", len(unmatched_osm),'\n')
   return merged_df
+
+def count_pois_near_coordinates(latitude: float, longitude: float, tags: dict, distance_km: float = 1.0) -> dict:
+    """
+    Count Points of Interest (POIs) near a given pair of coordinates within a specified distance.
+    Args:
+        latitude (float): Latitude of the location.
+        longitude (float): Longitude of the location.
+        tags (dict): A dictionary of OSM tags to filter the POIs (e.g., {'amenity': True, 'tourism': True}).
+        distance_km (float): The distance around the location in kilometers. Default is 1 km.
+    Returns:
+        dict: A dictionary where keys are the OSM tags and values are the counts of POIs for each tag.
+    """
+    pois = ox.geometries_from_point((latitude, longitude), tags=tags, dist=distance_km*1000)
+
+    pois_count = {}
+
+    for tag in tags.keys():
+      if tag in pois.columns:
+        pois_count[tag] = pois[tag].notnull().sum()
+      else:
+        pois_count[tag] = 0
+
+    return pois_count
