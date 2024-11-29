@@ -1,8 +1,10 @@
 import pandas as pd
+from shapely import box
 from .config import *
 import osmnx as ox
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine
+import geopandas as gpd
 from . import access
 
 """These are the types of import we might expect in this file
@@ -138,3 +140,93 @@ def count_pois_near_coordinates(latitude: float, longitude: float, tags: dict, d
         pois_count[tag] = 0
 
     return pois_count
+
+def get_all_pois_sql(username, password, url, tags):
+
+  query = f"Select * from osm_england_nodes where "
+
+  # select all rows with appropriate tags
+  conditions = " OR ".join([f"JSON_CONTAINS(tags, '\"{feature}\"', '$.{tag}')" for tag, features in tags.items() for feature in features ])
+  query += conditions
+
+  engine = create_engine(f"mysql+pymysql://{username}:{password}@{url}/{'ads_2024'}")
+  tag_filtered_osm_nodes_df = pd.read_sql_query(query, engine)
+  return tag_filtered_osm_nodes_df
+
+def get_boxed_pois_from_df(lat, long, tag_filtered_df, area):
+  lat_per_km = 0.009 * 2 * (int(area / 1_000_000) + 1)
+  long_per_km = 0.014 * 2 * (int(area / 1_000_000) + 1)
+  local_nodes_df = tag_filtered_df[
+      (tag_filtered_df['latitude'] > lat - lat_per_km) &
+      (tag_filtered_df['latitude'] < lat + lat_per_km) &
+      (tag_filtered_df['longitude'] > long - long_per_km) &
+      (tag_filtered_df['longitude'] < long + long_per_km)]
+  return local_nodes_df
+
+def get_pois_count_from_df(tags, local_nodes_df):
+  pois_count = {}
+  for tag, features in tags.items():
+    for feature in features:
+      count = local_nodes_df["tags"].apply(lambda x:f'"{tag}": "{feature}"' in x).sum()
+      pois_count[feature] = count
+  return pois_count
+
+def get_pois_count_df_from_coords(lats, longs, tags, areas):
+  tag_filtered_osm_nodes_df = get_all_pois_sql(tags)
+  pois_count_df = pd.DataFrame({feature:[] for _, features in tags.items() for feature in features})
+  n = 0
+  for lat, long, area in zip(lats, longs, areas):
+    local_nodes_df = get_boxed_pois_from_df(lat, long, tag_filtered_osm_nodes_df, area)
+    pois_count = get_pois_count_from_df(tags, local_nodes_df)
+    pois_count_df.loc[n] = pois_count
+    n += 1
+  return pois_count_df
+
+def get_rail_geo_dfs():
+  rail_2012_geo_df = gpd.read_file("/content/2012rail.geojson")
+  rail_2022_geo_df = gpd.read_file("/content/2022rail.geojson")
+  return rail_2012_geo_df, rail_2022_geo_df
+
+
+def get_num_local_pois_from_geo_df(lat, long, geo_df):
+  north, south, west, east = get_box(lat, long, 2)
+  bbox_geom = box(west, south, east, north)
+  nodes = geo_df[
+    (geo_df.geometry.type == 'Point')
+  ] 
+  nodes_in_range = nodes[
+    (nodes.geometry.x >= west) &
+    (nodes.geometry.x <= east) &
+    (nodes.geometry.y >= south) &
+    (nodes.geometry.y <= north)
+  ]
+  ways_in_range = geo_df[
+      (geo_df.geometry.type == 'LineString') &
+      (geo_df.geometry.intersects(bbox_geom))
+  ]
+  polygons_in_range = geo_df[
+      (geo_df.geometry.type == 'Polygon') &
+      (geo_df.geometry.intersects(bbox_geom))
+  ]
+  relations_in_range = geo_df[
+    (geo_df.geometry.type == 'MultiPolygon') &
+    (geo_df.geometry.intersects(bbox_geom))
+  ]
+  return len(nodes_in_range) + len(ways_in_range) + len(polygons_in_range) + len(relations_in_range)
+
+def get_diff_rail_count(lat, long, rail_2022_geo_df, rail_2012_geo_df):
+  return get_num_local_pois_from_geo_df(lat, long, rail_2022_geo_df) - get_num_local_pois_from_geo_df(lat, long, rail_2012_geo_df)
+
+def get_df_from_sql_query(query, username, password, url):
+  engine = create_engine(f"mysql+pymysql://{username}:{password}@{url}:{3306}/ads_2024")
+  return pd.read_sql_query(query, engine)
+
+def get_num_local_new_builds(new_build_coords_df, lat, long):
+  north, south, west, east = get_box(lat, long, 1)
+  new_builds_within_bbox = new_build_coords_df[
+                            (new_build_coords_df['latitude'] >= south) 
+                            & (new_build_coords_df['latitude'] <= north) 
+                            & (new_build_coords_df['longitude'] >= west) 
+                            & (new_build_coords_df['longitude'] <= east)
+                          ]
+  return len(new_builds_within_bbox)

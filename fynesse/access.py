@@ -1,8 +1,11 @@
+import json
 from matplotlib import pyplot as plt
 import pandas as pd
 import pymysql
+from sqlalchemy import create_engine
 from config import *
 import requests
+import osmium
 import yaml
 import csv
 import osmnx as ox
@@ -82,3 +85,33 @@ def housing_upload_join_data(conn, year):
     cur.execute(f"LOAD DATA LOCAL INFILE '" + csv_file_path + "' INTO TABLE `prices_coordinates_data` FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED by '\"' LINES STARTING BY '' TERMINATED BY '\n';")
     conn.commit()
     print('Data stored for year: ' + str(year))
+
+class TestError(Exception):
+    def __init__(self):
+        super().__init__()
+
+class OSMHandler(osmium.SimpleHandler):
+    def __init__(self):
+        super().__init__()
+        self.nodes = []
+
+
+    def node(self, n):
+        self.nodes.append([n.id, n.location.lat, n.location.lon, dict(n.tags)])
+
+
+def full_england_osm_to_df():
+    handler = OSMHandler()
+    handler.apply_file("england-latest.osm.pbf")
+    nodes_df = pd.DataFrame(handler.nodes, columns=["id", "latitude", "longitude", "tags"])
+
+    # filter out points without tags
+    nodes_df = nodes_df[nodes_df['tags'] != {}].reset_index()
+
+    nodes_df['tags'] = nodes_df['tags'].apply(lambda x: json.dumps(x))
+    return nodes_df
+
+def upload_full_england_osm(username, password, url):
+    node_df = full_england_osm_to_df()
+    engine = create_engine(f"mysql+pymysql://{username}:{password}@{url}/{'ads_2024'}")
+    node_df.to_sql(name='osm_england_nodes', con=engine, if_exists='replace')
